@@ -202,9 +202,15 @@ super-ralphy --skills "create convex mutation for users"
 # → Injects Convex patterns into the prompt
 ```
 
-### Auto-Install Skills
+### Auto-Install Dependencies
 
 ```bash
+# Install Argus MCP for codebase intelligence
+super-ralphy --install-argus
+
+# Install agent-browser for browser automation
+super-ralphy --install-browser
+
 # Install agent-browser skill for Claude Code
 super-ralphy --install-skill agent-browser
 
@@ -450,6 +456,8 @@ super-ralphy --base-branch main             # branch from main
 | `--notes` | Write session working notes |
 | `--pm-mode` | Enforce PM mode (delegate only) |
 | `--install-skill NAME` | Install a skill to .claude/skills/ |
+| `--install-argus` | Install Argus MCP for codebase intelligence |
+| `--install-browser` | Install agent-browser for browser automation |
 | **Execution** | |
 | `--parallel` | Run tasks in parallel |
 | `--max-parallel N` | Max parallel agents (default: 3) |

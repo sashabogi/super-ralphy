@@ -168,6 +168,8 @@ SUPER RALPHY FEATURES:
   --notes                 Write session working notes
   --pm-mode               Enforce PM mode (delegate only, never code directly)
   --install-skill NAME    Install a skill to .claude/skills/
+  --install-argus         Install Argus MCP for codebase intelligence
+  --install-browser       Install agent-browser for browser automation
 
 EXECUTION:
   --parallel              Run tasks in parallel
@@ -600,6 +602,57 @@ install_skill() {
       exit 1
       ;;
   esac
+}
+
+install_argus() {
+  log_info "Installing Argus MCP..."
+  
+  # Check if npm is available
+  if ! command -v npm &>/dev/null; then
+    log_error "npm is required to install Argus"
+    exit 1
+  fi
+  
+  # Install from GitHub
+  if npm install -g github:sashabogojevic/argus-mcp 2>/dev/null; then
+    log_success "Argus MCP installed globally"
+  else
+    log_warn "Global install failed, trying local install..."
+    npm install github:sashabogojevic/argus-mcp 2>/dev/null || {
+      log_error "Failed to install Argus MCP"
+      log_info "Manual install: npm install github:sashabogojevic/argus-mcp"
+      exit 1
+    }
+    log_success "Argus MCP installed locally"
+  fi
+  
+  # Verify installation
+  if command -v argus &>/dev/null; then
+    log_success "Argus is ready: $(argus --version 2>/dev/null || echo 'installed')"
+  else
+    log_info "Argus installed. You may need to restart your terminal or add node_modules/.bin to PATH"
+  fi
+}
+
+install_agent_browser() {
+  log_info "Installing agent-browser..."
+  
+  if ! command -v npm &>/dev/null; then
+    log_error "npm is required to install agent-browser"
+    exit 1
+  fi
+  
+  npm install -g agent-browser || {
+    log_error "Failed to install agent-browser"
+    exit 1
+  }
+  
+  log_info "Downloading Chromium (this may take a minute)..."
+  agent-browser install || {
+    log_warn "Chromium download failed. Run 'agent-browser install' manually."
+  }
+  
+  log_success "agent-browser installed"
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1227,6 +1280,14 @@ parse_args() {
         ;;
       --install-skill)
         install_skill "$2"
+        exit 0
+        ;;
+      --install-argus)
+        install_argus
+        exit 0
+        ;;
+      --install-browser)
+        install_agent_browser
         exit 0
         ;;
       
