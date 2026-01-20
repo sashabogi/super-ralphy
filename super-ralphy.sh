@@ -614,13 +614,13 @@ install_argus() {
   fi
   
   # Install from GitHub
-  if npm install -g github:sashabogi/argus-mcp 2>/dev/null; then
+  if npm install -g github:sashabogi/argus 2>/dev/null; then
     log_success "Argus MCP installed globally"
   else
     log_warn "Global install failed, trying local install..."
-    npm install github:sashabogi/argus-mcp 2>/dev/null || {
+    npm install github:sashabogi/argus 2>/dev/null || {
       log_error "Failed to install Argus MCP"
-      log_info "Manual install: npm install github:sashabogi/argus-mcp"
+      log_info "Manual install: npm install github:sashabogi/argus"
       exit 1
     }
     log_success "Argus MCP installed locally"
