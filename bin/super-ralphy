@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Entry point for super-ralphy npm package
+# Locates and runs the main script
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+exec "$SCRIPT_DIR/super-ralphy.sh" "$@"

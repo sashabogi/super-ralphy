@@ -1,0 +1,38 @@
+{
+  "name": "super-ralphy",
+  "version": "1.0.0",
+  "description": "Enhanced autonomous AI coding loop with sub-agents, skills injection, and quality gates. Inspired by Ralph Wiggum and Ralphy.",
+  "author": "Sasha Bogojevic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sashabogojevic/super-ralphy"
+  },
+  "keywords": [
+    "ai",
+    "claude",
+    "claude-code",
+    "autonomous",
+    "coding",
+    "agent",
+    "loop",
+    "prd",
+    "ralphy",
+    "ralph-wiggum"
+  ],
+  "bin": {
+    "super-ralphy": "./bin/super-ralphy"
+  },
+  "files": [
+    "bin/",
+    "super-ralphy.sh",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "postinstall": "chmod +x super-ralphy.sh && chmod +x bin/super-ralphy"
+  },
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
