@@ -49,7 +49,7 @@ super-ralphy --prd PRD.md
 ### Option B: Clone
 
 ```bash
-git clone https://github.com/sashabogojevic/super-ralphy.git
+git clone https://github.com/sashabogi/super-ralphy.git
 cd super-ralphy && chmod +x super-ralphy.sh
 
 ./super-ralphy.sh "add login button"

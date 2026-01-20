@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Super Ralphy - Enhanced autonomous AI coding loop
 # Inspired by Ralph Wiggum (Anthropic) and Ralphy (michaelshimeles)
-# https://github.com/sashabogojevic/super-ralphy
+# https://github.com/sashabogi/super-ralphy
 
 set -euo pipefail
 
@@ -345,7 +345,7 @@ init_config() {
   # Create config file
   cat > "$CONFIG_FILE" << EOF
 # Super Ralphy Configuration
-# https://github.com/sashabogojevic/super-ralphy
+# https://github.com/sashabogi/super-ralphy
 
 project:
   name: "${project_name:-my-project}"
@@ -614,13 +614,13 @@ install_argus() {
   fi
   
   # Install from GitHub
-  if npm install -g github:sashabogojevic/argus-mcp 2>/dev/null; then
+  if npm install -g github:sashabogi/argus-mcp 2>/dev/null; then
     log_success "Argus MCP installed globally"
   else
     log_warn "Global install failed, trying local install..."
-    npm install github:sashabogojevic/argus-mcp 2>/dev/null || {
+    npm install github:sashabogi/argus-mcp 2>/dev/null || {
       log_error "Failed to install Argus MCP"
-      log_info "Manual install: npm install github:sashabogojevic/argus-mcp"
+      log_info "Manual install: npm install github:sashabogi/argus-mcp"
       exit 1
     }
     log_success "Argus MCP installed locally"
