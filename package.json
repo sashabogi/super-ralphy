@@ -29,9 +29,7 @@
     "README.md",
     "LICENSE"
   ],
-  "scripts": {
-    "postinstall": "chmod +x super-ralphy.sh && chmod +x bin/super-ralphy"
-  },
+  "scripts": {},
   "engines": {
     "node": ">=14.0.0"
   }
