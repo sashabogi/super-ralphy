@@ -613,17 +613,13 @@ install_argus() {
     exit 1
   fi
   
-  # Install from GitHub
-  if npm install -g github:sashabogi/argus 2>/dev/null; then
+  # Install from GitHub tarball
+  if npm install -g https://github.com/sashabogi/argus/tarball/main 2>/dev/null; then
     log_success "Argus MCP installed globally"
   else
-    log_warn "Global install failed, trying local install..."
-    npm install github:sashabogi/argus 2>/dev/null || {
-      log_error "Failed to install Argus MCP"
-      log_info "Manual install: npm install github:sashabogi/argus"
-      exit 1
-    }
-    log_success "Argus MCP installed locally"
+    log_error "Failed to install Argus MCP"
+    log_info "Manual install: npm install -g https://github.com/sashabogi/argus/tarball/main"
+    exit 1
   fi
   
   # Verify installation
@@ -641,8 +637,9 @@ install_argus() {
     echo "  argus setup .                    # Setup for a project"
     echo "  argus snapshot . --enhanced      # Create snapshot with metadata"
     echo "  argus mcp install                # Add to Claude Code"
+    echo "  argus update                     # Update to latest version"
   else
-    log_info "Argus installed. You may need to restart your terminal or add node_modules/.bin to PATH"
+    log_info "Argus installed. You may need to restart your terminal."
   fi
 }
 

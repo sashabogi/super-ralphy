@@ -253,7 +253,7 @@ get_file_deps("app.tsx")         → ["./auth", "./theme", "@/components/ui"]
 ```bash
 super-ralphy --install-argus     # Install with enhanced features
 # Or manually:
-npm install -g github:sashabogi/argus
+npm install -g https://github.com/sashabogi/argus/tarball/main
 ```
 
 ---
