@@ -156,8 +156,8 @@ TASK SOURCES:
 SUPER RALPHY FEATURES:
   --agents                Enable sub-agent routing (coder/tester/reviewer/documenter)
   --skills                Enable skills injection from .claude/skills/
-  --argus                 Enable Argus codebase intelligence
-  --argus-refresh         Force Argus snapshot refresh
+  --argus                 Enable Argus codebase intelligence (uses enhanced snapshots)
+  --argus-refresh         Force Argus snapshot refresh before run
   --browser               Enable browser verification (requires agent-browser)
   --browser-url URL       Dev server URL (default: http://localhost:3000)
   --browser-headed        Show visible browser window
@@ -168,7 +168,7 @@ SUPER RALPHY FEATURES:
   --notes                 Write session working notes
   --pm-mode               Enforce PM mode (delegate only, never code directly)
   --install-skill NAME    Install a skill to .claude/skills/
-  --install-argus         Install Argus MCP for codebase intelligence
+  --install-argus         Install Argus MCP (with enhanced features)
   --install-browser       Install agent-browser for browser automation
 
 EXECUTION:
@@ -605,7 +605,7 @@ install_skill() {
 }
 
 install_argus() {
-  log_info "Installing Argus MCP..."
+  log_info "Installing Argus MCP (codebase intelligence)..."
   
   # Check if npm is available
   if ! command -v npm &>/dev/null; then
@@ -629,6 +629,18 @@ install_argus() {
   # Verify installation
   if command -v argus &>/dev/null; then
     log_success "Argus is ready: $(argus --version 2>/dev/null || echo 'installed')"
+    echo ""
+    echo -e "${BOLD}Argus Features:${RESET}"
+    echo "  • search_codebase  - Fast regex search (FREE, instant)"
+    echo "  • analyze_codebase - AI-powered architecture analysis"
+    echo "  • find_importers   - Who imports this file? (FREE)"
+    echo "  • find_symbol      - Where is this exported? (FREE)"
+    echo "  • get_file_deps    - What does this file import? (FREE)"
+    echo ""
+    echo -e "${BOLD}Usage:${RESET}"
+    echo "  argus setup .                    # Setup for a project"
+    echo "  argus snapshot . --enhanced      # Create snapshot with metadata"
+    echo "  argus mcp install                # Add to Claude Code"
   else
     log_info "Argus installed. You may need to restart your terminal or add node_modules/.bin to PATH"
   fi
@@ -663,19 +675,26 @@ refresh_argus() {
   local snapshot=".argus/snapshot.txt"
   
   if command -v argus &>/dev/null || [[ -d "node_modules/argus-mcp" ]]; then
-    log_info "Refreshing Argus snapshot..."
+    log_info "Refreshing Argus snapshot (enhanced mode)..."
     
     mkdir -p .argus
     
-    # Try different Argus invocations
+    # Try different Argus invocations - always use --enhanced for structural metadata
     if command -v argus &>/dev/null; then
-      argus snapshot --output "$snapshot" 2>/dev/null || true
+      argus snapshot . --output "$snapshot" --enhanced 2>/dev/null || \
+        argus snapshot . --output "$snapshot" 2>/dev/null || true
     elif [[ -f "node_modules/.bin/argus" ]]; then
-      node_modules/.bin/argus snapshot --output "$snapshot" 2>/dev/null || true
+      node_modules/.bin/argus snapshot . --output "$snapshot" --enhanced 2>/dev/null || \
+        node_modules/.bin/argus snapshot . --output "$snapshot" 2>/dev/null || true
     fi
     
     if [[ -f "$snapshot" ]]; then
-      log_success "Argus snapshot refreshed"
+      # Check if it's enhanced
+      if grep -q "METADATA: IMPORT GRAPH" "$snapshot" 2>/dev/null; then
+        log_success "Argus snapshot refreshed (with import graph & symbol index)"
+      else
+        log_success "Argus snapshot refreshed (basic mode)"
+      fi
       ARGUS_TASK_COUNT=0
     fi
   else

@@ -225,14 +225,36 @@ npx add-skill vercel-labs/agent-skills
 [Argus](https://github.com/sashabogi/argus) provides codebase intelligence without burning context.
 
 ```bash
-super-ralphy --argus            # refresh snapshot, use for context
-super-ralphy --argus-refresh    # force refresh before run
+super-ralphy --argus            # Enable with enhanced snapshots
+super-ralphy --argus-refresh    # Force refresh before run
 ```
 
-Super Ralphy will:
-1. Check for `.argus/snapshot.txt`
-2. Refresh if stale (>5 tasks since last refresh)
-3. Use Argus queries for codebase context in prompts
+Super Ralphy uses **enhanced snapshots** by default, which include:
+
+| Feature | What It Provides | Cost |
+|---------|-----------------|------|
+| Import Graph | Who imports what file | FREE |
+| Export Index | Symbol → files that export it | FREE |
+| Who Imports Whom | Reverse dependency graph | FREE |
+| Function Signatures | With line numbers | FREE |
+
+### How Claude Code Uses This
+
+Instead of reading 15 files to understand a flow, Claude Code can now:
+
+```
+find_symbol("useAuth")           → "contexts/auth-context.tsx:42"
+find_importers("auth-context")   → ["app.tsx", "dashboard.tsx", ...]
+get_file_deps("app.tsx")         → ["./auth", "./theme", "@/components/ui"]
+```
+
+### Install Argus
+
+```bash
+super-ralphy --install-argus     # Install with enhanced features
+# Or manually:
+npm install -g github:sashabogi/argus
+```
 
 ---
 
