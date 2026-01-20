@@ -31,9 +31,29 @@ RESET='\033[0m'
 PRD_FILE=""
 YAML_FILE=""
 SINGLE_TASK=""
+GITHUB_REPO=""
+GITHUB_LABEL=""
 
 # AI Engine
 ENGINE="claude"
+
+# Engine command map (associative array for engine-specific commands)
+typeset -A ENGINE_CMD
+ENGINE_CMD["claude"]="claude -p"
+ENGINE_CMD["opencode"]="opencode"
+ENGINE_CMD["cursor"]="cursor"
+ENGINE_CMD["codex"]="codex"
+ENGINE_CMD["qwen"]="qwen"
+ENGINE_CMD["droid"]="droid"
+
+# Engine-friendly names for display
+typeset -A ENGINE_NAME
+ENGINE_NAME["claude"]="Claude Code"
+ENGINE_NAME["opencode"]="OpenCode"
+ENGINE_NAME["cursor"]="Cursor"
+ENGINE_NAME["codex"]="Codex"
+ENGINE_NAME["qwen"]="Qwen-Code"
+ENGINE_NAME["droid"]="Factory Droid"
 
 # Super Ralphy features
 ENABLE_AGENTS=false
@@ -56,6 +76,11 @@ USE_WORKTREES=true
 WORKTREE_DIR=".worktrees"
 BASE_BRANCH=""
 AI_MERGE=true
+
+# Branch per Task workflow
+BRANCH_PER_TASK=false
+CREATE_PR=false
+DRAFT_PR=false
 
 # Quality gates
 GATE_TEST=true
@@ -132,6 +157,11 @@ typeset -A TASK_PARALLEL_GROUP # task -> parallel group number
 typeset -A TASK_RAW_DEPS      # task -> raw dependency list from YAML
 typeset -A _YAML_GROUP_TASKS  # internal: group -> space-separated task IDs
 
+# GitHub issue tracking
+typeset -A TASK_ISSUE_NUMBER  # task -> GitHub issue number
+typeset -A TASK_ISSUE_URL     # task -> GitHub issue URL
+typeset -A TASK_ISSUE_REPO    # task -> GitHub repo (owner/repo)
+
 RUNNING_COUNT=0
 SESSION_FILE=""               # Current working notes session file
 SESSION_START_TIME=""         # Session start timestamp
@@ -175,6 +205,15 @@ USAGE:
   super-ralphy [OPTIONS] [TASK]
   super-ralphy --prd PRD.md --parallel
 
+
+AI ENGINE:
+  (no flag)              Claude Code (default)
+  --opencode              OpenCode
+  --cursor                Cursor
+  --codex                 Codex
+  --qwen                  Qwen-Code
+  --droid                 Factory Droid
+
 PROJECT CONFIG:
   --init                  Auto-detect and create .super-ralphy/config.yaml
   --config                Show current project configuration
@@ -183,6 +222,8 @@ PROJECT CONFIG:
 TASK SOURCES:
   --prd FILE              Markdown PRD with tasks
   --yaml FILE             YAML task file
+  --github REPO           GitHub issues (owner/repo format)
+  --github-label LABEL    Filter issues by label
   "task description"      Single task
 
 PARALLEL EXECUTION:
@@ -190,6 +231,10 @@ PARALLEL EXECUTION:
   --max-parallel N        Max concurrent agents (default: 3)
   --worktrees             Use git worktrees
   --ai-merge              Use AI to resolve merge conflicts
+  --branch-per-task       Create branch per task (keep after merge)
+  --base-branch NAME      Base branch for branching (default: current)
+  --create-pr             Create PRs for each task branch
+  --draft-pr              Create draft PRs instead of regular PRs
 
 FEATURES:
   --agents                Enable sub-agent routing
@@ -213,6 +258,7 @@ EXAMPLES:
   super-ralphy --add-rule "strict mode"  # Add rule
   super-ralphy --prd PRD.md --parallel   # Parallel execution
   super-ralphy --browser "fix login"     # Verify with browser after coding
+  super-ralphy --opencode "fix bug"      # Use OpenCode engine
 EOF
 }
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -221,29 +267,191 @@ EOF
 
 check_dependencies() {
   local missing=()
-  
+
   command -v jq &>/dev/null || missing+=("jq")
   command -v git &>/dev/null || missing+=("git")
-  
-  case "$ENGINE" in
-    claude)
-      command -v claude &>/dev/null || {
-        log_error "Claude Code CLI not found"
-        exit 1
-      }
-      ;;
-  esac
-  
+
+  # Check for gh CLI if GitHub repo is specified
+  if [[ -n "$GITHUB_REPO" ]]; then
+    command -v gh &>/dev/null || {
+      log_error "GitHub CLI (gh) not found. Install with: brew install gh"
+      exit 1
+    }
+    # Check if user is authenticated
+    if ! gh auth status &>/dev/null; then
+      log_error "GitHub CLI not authenticated. Run: gh auth login"
+      exit 1
+    fi
+  fi
+
   if [[ ${#missing[@]} -gt 0 ]]; then
     log_error "Missing: ${missing[*]}"
     exit 1
   fi
-  
+
   # Check we're in a git repo
   if ! git rev-parse --git-dir &>/dev/null; then
     log_error "Not in a git repository"
     exit 1
   fi
+}
+
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GitHub Issues Integration
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Parse GitHub issues from a repository
+parse_github_issues() {
+  local repo="$1"
+  local label="${2:-}"
+
+  log_info "Fetching issues from $repo"
+
+  # Build gh command with optional label filter
+  local gh_cmd="gh issue list --repo "$repo" --state open --json number,title,url"
+
+  if [[ -n "$label" ]]; then
+    gh_cmd="gh issue list --repo "$repo" --label "$label" --state open --json number,title,url"
+    log_info "Filtering by label: $label"
+  fi
+
+  # Fetch issues using gh CLI
+  local issues_json
+  issues_json=$(eval "$gh_cmd" 2>/dev/null)
+
+  if [[ -z "$issues_json" ]]; then
+    log_warn "No issues found"
+    return 0
+  fi
+
+  # Parse JSON and create tasks
+  local count=0
+  while IFS= read -r line; do
+    if [[ -z "$line" ]]; then
+      continue
+    fi
+
+    # Extract issue number, title, and URL using jq
+    local number=$(echo "$line" | jq -r '.number // empty' 2>/dev/null)
+    local title=$(echo "$line" | jq -r '.title // empty' 2>/dev/null)
+    local url=$(echo "$line" | jq -r '.url // empty' 2>/dev/null)
+
+    if [[ -n "$number" && -n "$title" ]]; then
+      # Create task ID from issue number
+      local task_id="ISSUE-${number}"
+
+      # Store issue metadata
+      TASK_ISSUE_NUMBER["$task_id"]="$number"
+      TASK_ISSUE_URL["$task_id"]="$url"
+      TASK_ISSUE_REPO["$task_id"]="$repo"
+      TASK_DEPS["$task_id"]=""
+      TASK_STATUS["$task_id"]="pending"
+
+      # Output in standard format (task_id|title)
+      echo "$task_id|$title"
+
+      ((count++))
+      log_debug "Parsed issue: $number -> $task_id"
+    fi
+  done < <(echo "$issues_json" | jq -c '.[]' 2>/dev/null)
+
+  log_info "Fetched $count issue(s) from $repo"
+  return 0
+}
+
+# Close a GitHub issue when task completes
+close_github_issue() {
+  local task_id="$1"
+  local issue_number="${TASK_ISSUE_NUMBER[$task_id]:-}"
+  local repo="${TASK_ISSUE_REPO[$task_id]:-}"
+
+  if [[ -z "$issue_number" || -z "$repo" ]]; then
+    log_debug "No GitHub issue associated with $task_id"
+    return 0
+  fi
+
+  log_info "Closing GitHub issue #$issue_number"
+
+  if gh issue close "$issue_number" --repo "$repo" --comment "Completed via Super Ralphy" 2>/dev/null; then
+    log_success "Closed issue #$issue_number"
+    return 0
+  else
+    log_warn "Failed to close issue #$issue_number"
+    return 1
+  fi
+}
+
+# Comment on a GitHub issue
+comment_github_issue() {
+  local task_id="$1"
+  local comment="$2"
+  local issue_number="${TASK_ISSUE_NUMBER[$task_id]:-}"
+  local repo="${TASK_ISSUE_REPO[$task_id]:-}"
+
+  if [[ -z "$issue_number" || -z "$repo" ]]; then
+    return 0
+  fi
+
+  log_debug "Commenting on issue #$issue_number"
+  gh issue comment "$issue_number" --repo "$repo" --body "$comment" 2>/dev/null || true
+}
+
+# Check if the selected engine is available, with fallback to Claude
+check_engine() {
+  local engine="$1"
+  local engine_cmd="${ENGINE_CMD[$engine]:-}"
+  local engine_name="${ENGINE_NAME[$engine]:-$engine}"
+
+  # Extract the binary name from the command (first word)
+  local binary="${engine_cmd%% *}"
+
+  if command -v "$binary" &>/dev/null; then
+    log_debug "Engine available: $engine_name ($binary)"
+    return 0
+  fi
+
+  # Engine not found, warn and fall back to Claude
+  if [[ "$engine" != "claude" ]]; then
+    log_warn "$engine_name not found (command: $binary)"
+    if command -v claude &>/dev/null; then
+      log_warn "Falling back to Claude Code"
+      ENGINE="claude"
+      return 0
+    else
+      log_error "No AI engine available"
+      log_error "  Please install one of: claude, opencode, cursor, codex, qwen, droid"
+      exit 1
+    fi
+  else
+    log_error "Claude Code CLI not found"
+    log_error "  Please install: npm install -g @anthropic-ai/claude-code"
+    exit 1
+  fi
+}
+
+# Run a prompt with the selected engine
+run_engine() {
+  local prompt="$1"
+  local engine="${ENGINE:-claude}"
+  local engine_cmd="${ENGINE_CMD[$engine]}"
+
+  if [[ -z "$engine_cmd" ]]; then
+    log_error "Unknown engine: $engine"
+    return 1
+  fi
+
+  # Claude uses -p flag, others take prompt directly
+  if [[ "$engine" == "claude" ]]; then
+    claude -p "$prompt" --dangerously-skip-permissions
+  else
+    # For other engines, check if they support a prompt flag
+    # Most accept the prompt directly as argument
+    $engine_cmd "$prompt" 2>/dev/null
+  fi
+
+  return $?
 }
 
 # Project Config Management functions
@@ -1343,7 +1551,7 @@ execute_task_in_worktree() {
   
   local prompt=$(build_prompt "$task_id" "$task_title")
   
-  # Run Claude in the worktree
+  # Run selected AI engine in the worktree
   (
     cd "$worktree"
     
@@ -1351,9 +1559,9 @@ execute_task_in_worktree() {
     if [[ "$ENABLE_ARGUS" == true ]] && command -v argus &>/dev/null; then
       argus snapshot . -o .argus/snapshot.txt --enhanced 2>/dev/null || true
     fi
-    
-    # Execute with Claude
-    if claude -p "$prompt" --dangerously-skip-permissions &> "$log_file"; then
+
+    # Execute with selected engine
+    if run_engine "$prompt" &> "$log_file"; then
       # Auto-commit
       if [[ "$NO_COMMIT" != true ]]; then
         git add -A
@@ -1421,6 +1629,11 @@ check_task_completion() {
       log_success "[$task_id] Completed"
       write_task_note "$task_id" "completed" "Task completed"
 
+      # Close GitHub issue if this task was from a GitHub issue
+      if [[ -n "${TASK_ISSUE_NUMBER[$task_id]:-}" ]]; then
+        close_github_issue "$task_id" || true
+      fi
+
       # Run browser verification if enabled and task has verify_browser set
       if [[ "$ENABLE_BROWSER" == true ]] || [[ "${TASK_VERIFY_BROWSER[$task_id]:-false}" == "true" ]]; then
         local verify_url="${TASK_VERIFY_URL[$task_id]:-}"
@@ -1472,10 +1685,10 @@ merge_branch() {
       # Get conflict content
       local conflict_content=$(cat "$file")
 
-      # Use Claude to resolve
-      local resolution=$(claude -p "Resolve this git merge conflict intelligently. Output ONLY the resolved file content, no explanations:
+      # Use selected engine to resolve
+      local resolution=$(run_engine "Resolve this git merge conflict intelligently. Output ONLY the resolved file content, no explanations:
 
-$conflict_content" --dangerously-skip-permissions 2>/dev/null)
+$conflict_content" 2>/dev/null)
 
       if [[ -n "$resolution" ]]; then
         echo "$resolution" > "$file"
@@ -1501,25 +1714,163 @@ $conflict_content" --dangerously-skip-permissions 2>/dev/null)
 
 merge_completed_tasks() {
   log_info "Merging completed branches..."
-  
+
   local merged=0
   local failed=0
-  
+  local skipped=0
+
   for task_id in "${(k)TASK_STATUS}"; do
     if [[ "${TASK_STATUS[$task_id]}" == "done" && -n "${TASK_BRANCH[$task_id]:-}" ]]; then
-      if merge_branch "$task_id"; then
+      # In branch-per-task mode, we might skip merge and create PRs instead
+      if [[ "$BRANCH_PER_TASK" == true && "$CREATE_PR" == true ]]; then
+        # Skip merge, let PRs handle the integration
+        log_info "Skipping merge for $task_id (will create PR)"
+        ((skipped++))
+        cleanup_worktree "$task_id"
+      elif merge_branch "$task_id"; then
         ((merged++))
         cleanup_worktree "$task_id"
-        
-        # Delete branch after merge
-        git branch -d "${TASK_BRANCH[$task_id]}" 2>/dev/null || true
+
+        # Only delete branch if NOT in branch-per-task mode
+        if [[ "$BRANCH_PER_TASK" != true ]]; then
+          git branch -d "${TASK_BRANCH[$task_id]}" 2>/dev/null || true
+        else
+          log_info "Keeping branch ${TASK_BRANCH[$task_id]} (branch-per-task mode)"
+        fi
       else
         ((failed++))
       fi
     fi
   done
-  
-  log_info "Merged $merged branches ($failed conflicts)"
+
+  log_info "Merged: $merged, skipped: $skipped, conflicts: $failed"
+
+  # Create PRs if requested
+  if [[ "$CREATE_PR" == true ]]; then
+    create_pull_requests
+  fi
+}
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Pull Request Creation
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+# Check if gh CLI is available
+check_gh_cli() {
+  if ! command -v gh &>/dev/null; then
+    log_warn "gh CLI not found. Install with: brew install gh (or equivalent)"
+    log_warn "PR creation skipped. Install gh to enable --create-pr"
+    return 1
+  fi
+
+  # Check if authenticated
+  if ! gh auth status &>/dev/null; then
+    log_warn "gh CLI not authenticated. Run: gh auth login"
+    return 1
+  fi
+
+  return 0
+}
+
+# Create a pull request for a task branch
+create_pull_request() {
+  local task_id="$1"
+  local task_title="$2"
+  local branch="${TASK_BRANCH[$task_id]}"
+
+  [[ -z "$branch" ]] && {
+    log_warn "No branch found for task $task_id, skipping PR creation"
+    return 1
+  }
+
+  # Ensure branch exists
+  if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+    log_warn "Branch $branch does not exist, skipping PR creation"
+    return 1
+  fi
+
+  # Check gh CLI
+  if ! check_gh_cli; then
+    return 1
+  fi
+
+  local base="${BASE_BRANCH:-$(git branch --show-current)}"
+
+  # Check if PR already exists
+  local existing_pr=$(gh pr list --head "$branch" --json number --jq '.[0].number' 2>/dev/null)
+  if [[ -n "$existing_pr" && "$existing_pr" != "null" ]]; then
+    log_info "PR already exists for $branch (#$existing_pr)"
+    write_task_note "$task_id" "pr_exists" "PR #$existing_pr already exists"
+    return 0
+  fi
+
+  # Build PR title and body
+  local pr_title="Super Ralphy: $task_title"
+  local pr_body="## Task: $task_id
+
+**Description:** $task_title
+
+**Branch:** \`$branch\`
+
+**Changes:**
+$(git log "$base..$branch" --oneline 2>/dev/null || echo "See commit history")
+
+---
+Created by Super Ralphy - AI-powered parallel coding loop"
+
+  log_info "Creating PR for $task_id..."
+
+  # Build gh pr create command
+  local gh_cmd="gh pr create"
+  gh_cmd="$gh_cmd --base $base"
+  gh_cmd="$gh_cmd --head $branch"
+  gh_cmd="$gh_cmd --title \"$pr_title\""
+  gh_cmd="$gh_cmd --body \"$pr_body\""
+
+  # Add draft flag if specified
+  if [[ "$DRAFT_PR" == true ]]; then
+    gh_cmd="$gh_cmd --draft"
+  fi
+
+  # Execute PR creation
+  local pr_output
+  if pr_output=$(eval "$gh_cmd" 2>&1); then
+    # Extract PR number from output
+    local pr_number=$(echo "$pr_output" | grep -oE '#[0-9]+' | head -1 | tr -d '#')
+    if [[ -n "$pr_number" ]]; then
+      log_success "PR created: #$pr_number"
+      write_task_note "$task_id" "pr_created" "PR #$pr_number created"
+    else
+      log_success "PR created for $task_id"
+      write_task_note "$task_id" "pr_created" "PR created"
+    fi
+    return 0
+  else
+    log_warn "Failed to create PR for $task_id: $pr_output"
+    write_task_note "$task_id" "pr_failed" "PR creation failed"
+    return 1
+  fi
+}
+
+# Create PRs for all completed task branches
+create_pull_requests() {
+  log_info "Creating pull requests..."
+
+  local created=0
+  local skipped=0
+  local failed=0
+
+  for task_id in "${(k)TASK_STATUS}"; do
+    if [[ "${TASK_STATUS[$task_id]}" == "done" && -n "${TASK_BRANCH[$task_id]:-}" ]]; then
+      if create_pull_request "$task_id" "${TASK_TITLES[$task_id]:-$task_id}"; then
+        ((created++))
+      else
+        ((failed++))
+      fi
+    fi
+  done
+
+  log_info "PRs created: $created, skipped: $skipped, failed: $failed"
 }
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1682,7 +2033,7 @@ run_single_gate() {
       ((retry_count++))
 
       if [[ $retry_count -lt $max_retries ]]; then
-        log_warn "Attempting to fix $gate_name issues with Claude..."
+        log_warn "Attempting to fix $gate_name issues with ${ENGINE_NAME[$ENGINE]}..."
 
         local fix_prompt="The following quality gate failed:
 Gate: $gate_name
@@ -1690,7 +2041,7 @@ Command: $gate_cmd
 
 Please fix the issues that caused this gate to fail. Make minimal changes to address the failures."
 
-        if claude -p "$fix_prompt" --dangerously-skip-permissions 2>/dev/null; then
+        if run_engine "$fix_prompt" 2>/dev/null; then
           log_info "Applied fix attempt, retrying $gate_name gate..."
 
           # Commit the fix if enabled
@@ -1699,7 +2050,7 @@ Please fix the issues that caused this gate to fail. Make minimal changes to add
             git commit -m "fix: auto-fix $gate_name gate failures" 2>/dev/null || true
           fi
         else
-          log_warn "Claude couldn't fix the issues"
+          log_warn "${ENGINE_NAME[$ENGINE]} couldn't fix the issues"
         fi
       else
         log_error "$gate_name gate failed after $max_retries attempts"
@@ -2058,6 +2409,8 @@ parallel_loop() {
     parse_tasks_with_deps "$PRD_FILE" > "$tasks_file"
   elif [[ -n "$YAML_FILE" ]]; then
     parse_yaml_tasks "$YAML_FILE" > "$tasks_file"
+  elif [[ -n "$GITHUB_REPO" ]]; then
+    parse_github_issues "$GITHUB_REPO" "$GITHUB_LABEL" > "$tasks_file"
   elif [[ -n "$SINGLE_TASK" ]]; then
     echo "TASK-SINGLE|$SINGLE_TASK" > "$tasks_file"
     TASK_DEPS["TASK-SINGLE"]=""
@@ -2180,31 +2533,95 @@ sequential_loop() {
     parse_tasks_with_deps "$PRD_FILE" > "$tasks_file"
   elif [[ -n "$YAML_FILE" ]]; then
     parse_yaml_tasks "$YAML_FILE" > "$tasks_file"
+  elif [[ -n "$GITHUB_REPO" ]]; then
+    parse_github_issues "$GITHUB_REPO" "$GITHUB_LABEL" > "$tasks_file"
   elif [[ -n "$SINGLE_TASK" ]]; then
     echo "TASK-SINGLE|$SINGLE_TASK" > "$tasks_file"
   fi
-  
+
+  # Load task titles for PR creation
+  typeset -A TASK_TITLES
+  while IFS='|' read -r task_id task_title; do
+    TASK_TITLES["$task_id"]="$task_title"
+  done < "$tasks_file"
+
+  # Setup worktree directory if using branch-per-task
+  if [[ "$BRANCH_PER_TASK" == true ]]; then
+    USE_WORKTREES=true
+    setup_worktree_dir
+    BASE_BRANCH=$(git branch --show-current)
+  fi
+
   local completed=0
   local failed=0
-  
+
   while IFS='|' read -r task_id task_title; do
     log_task "[$task_id] $task_title"
-    
+
+    # In branch-per-task mode, create a branch for this task
+    local original_branch=""
+    local task_branch=""
+
+    if [[ "$BRANCH_PER_TASK" == true ]]; then
+      task_branch="super-ralphy/$task_id"
+      original_branch=$(git branch --show-current)
+
+      # Create and checkout branch
+      if git show-ref --verify --quiet "refs/heads/$task_branch"; then
+        git branch -D "$task_branch" 2>/dev/null || true
+      fi
+      git checkout -b "$task_branch" "${BASE_BRANCH:-$original_branch}" 2>/dev/null || {
+        log_error "Failed to create branch $task_branch"
+        ((failed++))
+        continue
+      }
+
+      TASK_BRANCH["$task_id"]="$task_branch"
+      log_info "Created branch: $task_branch"
+    fi
+
     local prompt=$(build_prompt "$task_id" "$task_title")
-    
+
     if [[ "$DRY_RUN" == true ]]; then
       log_info "[DRY RUN] Would execute: $task_title"
       ((completed++))
+      if [[ "$BRANCH_PER_TASK" == true ]]; then
+        git checkout "$original_branch" 2>/dev/null || true
+      fi
       continue
     fi
-    
-    if claude -p "$prompt" --dangerously-skip-permissions; then
+
+    if run_engine "$prompt"; then
       log_success "[$task_id] Completed"
+      TASK_STATUS["$task_id"]="done"
       ((completed++))
 
       if [[ "$NO_COMMIT" != true ]]; then
         git add -A
         git commit -m "feat: $task_title [$task_id]" 2>/dev/null || true
+      fi
+
+      # Close GitHub issue if this task was from a GitHub issue
+      if [[ -n "${TASK_ISSUE_NUMBER[$task_id]:-}" ]]; then
+        close_github_issue "$task_id" || true
+      fi
+
+      # In branch-per-task mode with PR creation, push and create PR
+      if [[ "$BRANCH_PER_TASK" == true ]]; then
+        # Push branch to remote
+        if git push -u origin "$task_branch" 2>/dev/null; then
+          log_success "Pushed branch $task_branch"
+        else
+          log_warn "Failed to push branch $task_branch (remote may not exist)"
+        fi
+
+        # Create PR if requested
+        if [[ "$CREATE_PR" == true ]]; then
+          create_pull_request "$task_id" "$task_title"
+        fi
+
+        # Return to original branch
+        git checkout "$original_branch" 2>/dev/null || true
       fi
 
       # Run quality gates after each task
@@ -2224,8 +2641,14 @@ sequential_loop() {
       fi
     else
       log_error "[$task_id] Failed"
+      TASK_STATUS["$task_id"]="failed"
       ((failed++))
-      
+
+      # Return to original branch if we switched
+      if [[ "$BRANCH_PER_TASK" == true ]]; then
+        git checkout "$original_branch" 2>/dev/null || true
+      fi
+
       if [[ "$STRICT_MODE" == true ]]; then
         break
       fi
@@ -2236,6 +2659,17 @@ sequential_loop() {
 
   echo ""
   echo -e "${BOLD}Summary:${RESET} $completed completed, $failed failed"
+
+  # In branch-per-task mode, show summary of created branches
+  if [[ "$BRANCH_PER_TASK" == true ]]; then
+    echo ""
+    log_info "Branches created:"
+    for task_id in "${(k)TASK_BRANCH}"; do
+      if [[ "${TASK_STATUS[$task_id]}" == "done" ]]; then
+        echo "  - ${TASK_BRANCH[$task_id]}: ${TASK_TITLES[$task_id]:-$task_id}"
+      fi
+    done
+  fi
 
   # Write session summary for sequential mode
   write_session_summary
@@ -2254,15 +2688,25 @@ parse_args() {
       -h|--help) show_help; exit 0 ;;
       --version) echo "Super Ralphy v$VERSION"; exit 0 ;;
 
+      # AI Engine selection
+      --claude) ENGINE="claude"; shift ;;
+      --opencode) ENGINE="opencode"; shift ;;
+      --cursor) ENGINE="cursor"; shift ;;
+      --codex) ENGINE="codex"; shift ;;
+      --qwen) ENGINE="qwen"; shift ;;
+      --droid) ENGINE="droid"; shift ;;
+
       # Project Config
       --init) shift; init_config; exit 0 ;;
       --config) shift; load_config; show_config; exit 0 ;;
       --add-rule) shift; add_rule "$1"; exit 0 ;;
-      
+
       # Task sources
       --prd) PRD_FILE="$2"; shift 2 ;;
       --yaml) YAML_FILE="$2"; shift 2 ;;
-      
+      --github) GITHUB_REPO="$2"; shift 2 ;;
+      --github-label) GITHUB_LABEL="$2"; shift 2 ;;
+
       # Parallel execution
       --parallel) PARALLEL=true; shift ;;
       --max-parallel) MAX_PARALLEL="$2"; shift 2 ;;
@@ -2270,7 +2714,11 @@ parse_args() {
       --no-worktrees) USE_WORKTREES=false; shift ;;
       --ai-merge) AI_MERGE=true; shift ;;
       --no-ai-merge) AI_MERGE=false; shift ;;
-      
+      --branch-per-task) BRANCH_PER_TASK=true; shift ;;
+      --base-branch) BASE_BRANCH="$2"; shift 2 ;;
+      --create-pr) CREATE_PR=true; BRANCH_PER_TASK=true; shift ;;
+      --draft-pr) DRAFT_PR=true; CREATE_PR=true; BRANCH_PER_TASK=true; shift ;;
+
       # Features
       --agents) ENABLE_AGENTS=true; shift ;;
       --skills) ENABLE_SKILLS=true; shift ;;
@@ -2284,17 +2732,17 @@ parse_args() {
       --gate-lint) ENABLE_QUALITY_GATES=true; GATE_TEST=false; GATE_LINT=true; GATE_TYPECHECK=false; shift ;;
       --gate-typecheck) ENABLE_QUALITY_GATES=true; GATE_TEST=false; GATE_LINT=false; GATE_TYPECHECK=true; shift ;;
       --notes) ENABLE_NOTES=true; shift ;;
-      
+
       # Control
       --no-commit) NO_COMMIT=true; shift ;;
       --max-retries) MAX_RETRIES="$2"; shift 2 ;;
       --strict) STRICT_MODE=true; shift ;;
       --dry-run) DRY_RUN=true; shift ;;
       -v|--verbose) VERBOSE=true; shift ;;
-      
+
       # Unknown
       -*) log_error "Unknown option: $1"; exit 1 ;;
-      
+
       # Single task
       *) SINGLE_TASK="$1"; shift ;;
     esac
@@ -2310,6 +2758,9 @@ main() {
 
   show_banner
   check_dependencies
+
+  # Check if selected engine is available (with fallback)
+  check_engine "$ENGINE"
 
   # Load project config if exists
   load_config
