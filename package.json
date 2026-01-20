@@ -1,36 +1,53 @@
 {
   "name": "super-ralphy",
-  "version": "1.0.0",
-  "description": "Enhanced autonomous AI coding loop with sub-agents, skills injection, and quality gates. Inspired by Ralph Wiggum and Ralphy.",
-  "author": "Sasha Bogojevic",
+  "version": "2.0.0",
+  "description": "Enhanced autonomous AI coding loop with sub-agents, skills injection, browser verification, and quality gates. Inspired by Ralph Wiggum and Ralphy.",
+  "author": "Sasha Bogojevic <sasha@example.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/sashabogi/super-ralphy"
+    "url": "https://github.com/sashabogi/super-ralphy.git"
+  },
+  "homepage": "https://github.com/sashabogi/super-ralphy#readme",
+  "bugs": {
+    "url": "https://github.com/sashabogi/super-ralphy/issues"
   },
   "keywords": [
     "ai",
     "claude",
     "claude-code",
+    "anthropic",
     "autonomous",
     "coding",
     "agent",
     "loop",
     "prd",
     "ralphy",
-    "ralph-wiggum"
+    "ralph-wiggum",
+    "parallel",
+    "worktrees",
+    "git",
+    "cli",
+    "developer-tools",
+    "automation"
   ],
   "bin": {
     "super-ralphy": "./bin/super-ralphy"
   },
   "files": [
-    "bin/",
+    "bin/super-ralphy",
     "super-ralphy.sh",
     "README.md",
     "LICENSE"
   ],
-  "scripts": {},
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
   "engines": {
     "node": ">=14.0.0"
-  }
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ]
 }

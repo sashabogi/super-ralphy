@@ -1,14 +1,18 @@
-#!/usr/bin/env bash
+#!/usr/bin/env zsh
 # Entry point for super-ralphy npm package
 # Locates and runs the main script
 
-# Resolve symlinks to find the real script location
-SOURCE="${BASH_SOURCE[0]}"
-while [ -h "$SOURCE" ]; do
-  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
-  SOURCE="$(readlink "$SOURCE")"
-  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
-done
-SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")/.." && pwd)"
+# Get the directory where this script is located
+SCRIPT_DIR="${0:A:h}"
 
-exec "$SCRIPT_DIR/super-ralphy.sh" "$@"
+# The main script is in the parent directory
+MAIN_SCRIPT="$SCRIPT_DIR/../super-ralphy.sh"
+
+# If not found, try the node_modules structure
+if [[ ! -f "$MAIN_SCRIPT" ]]; then
+  # Try using npm's package resolution
+  MAIN_SCRIPT="$SCRIPT_DIR/super-ralphy.sh"
+fi
+
+# Use zsh explicitly to run the script (script uses zsh-specific features)
+exec zsh "$MAIN_SCRIPT" "$@"
