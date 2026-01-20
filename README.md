@@ -2,7 +2,7 @@
 
 Enhanced autonomous AI coding loop with sub-agents, skills injection, browser automation, and quality gates.
 
-![Super Ralphy](assets/super-ralphy.png)
+![Super Ralphy](assets/super-ralphy.jpg)
 
 ## Credits & Inspiration
 
