@@ -222,7 +222,7 @@ npx add-skill vercel-labs/agent-skills
 
 ## Argus Integration
 
-[Argus](https://github.com/anthropics/argus) provides codebase intelligence without burning context.
+[Argus](https://github.com/sashabogi/argus) provides codebase intelligence without burning context.
 
 ```bash
 super-ralphy --argus            # refresh snapshot, use for context
@@ -500,7 +500,7 @@ super-ralphy --base-branch main             # branch from main
 - `yq` - for YAML tasks
 - `gh` - for GitHub issues / `--create-pr`
 - [agent-browser](https://github.com/vercel-labs/agent-browser) - for browser verification
-- [Argus MCP](https://github.com/anthropics/argus) - for codebase intelligence
+- [Argus MCP](https://github.com/sashabogi/argus) - for codebase intelligence
 
 ---
 
